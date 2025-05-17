@@ -25,6 +25,23 @@ function App() {
     }
   };
 
+  const handleCellChange = (rowIndex, columnId, value) => {
+    setTableData(prevData => {
+      const newRows = prevData.rows.map((row, rIndex) => {
+        if (rIndex === rowIndex) {
+          const updatedRow = { ...row, [columnId]: value };
+          // Acceptance Criteria: Empty test case name gets a generated default
+          if (columnId === 'Test Case Name' && !value.trim()) {
+            updatedRow[columnId] = `TC_${String(rowIndex + 1).padStart(2, '0')}`;
+          }
+          return updatedRow;
+        }
+        return row;
+      });
+      return { ...prevData, rows: newRows };
+    });
+  };
+
   return (
     <div className="App">
       <HomePage onJsonParsed={handleJsonSuccessfullyParsed} />
@@ -36,7 +53,11 @@ function App() {
       {tableData.headers && tableData.headers.length > 0 && (
         <div className="container mx-auto p-4 mt-4 border-t border-gray-200">
           <h2 className="text-xl font-semibold mb-2">Generated Test Cases Table</h2>
-          <JsonTable headers={tableData.headers} rows={tableData.rows} />
+          <JsonTable 
+            headers={tableData.headers} 
+            rows={tableData.rows} 
+            onCellChange={handleCellChange}
+          />
         </div>
       )}
       {currentJson && (

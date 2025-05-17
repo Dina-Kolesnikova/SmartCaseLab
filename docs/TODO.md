@@ -60,17 +60,19 @@ A React-based web app that takes a JSON object (uploaded or pasted), parses it, 
 
 ---
 
-### 4. ✏️ Enable Manual Cell Editing
+### 4. ✏️ Enable Manual Cell Editing [DONE*]
 
 **Tasks**
-- Allow user to type directly into any cell
-- Allow manual input in "Test Case Name" field
-- Autofill default names if left blank (`TC_01`, etc.)
+- [x] Allow user to type directly into any cell (for primitive values)
+- [x] Allow manual input in "Test Case Name" field
+- [x] Autofill default names if left blank (`TC_01`, etc.)
 
 **Acceptance Criteria**
-- User can edit any field
-- Empty test case name gets a generated default
-- All changes are reflected in real-time
+- [x] User can edit any field (primitive values; objects/arrays are read-only in cell)
+- [x] Empty test case name gets a generated default
+- [x] All changes are reflected in real-time
+
+*Note: Direct in-cell editing of complex types (objects/arrays) is not supported; they are displayed as JSON strings and are read-only. Further UI would be needed for structured editing of these types.*
 
 ---
 
