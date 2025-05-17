@@ -42,6 +42,44 @@ function App() {
     });
   };
 
+  const handleAddRow = () => {
+    setTableData(prevData => {
+      if (!prevData.headers || prevData.headers.length === 0) {
+        // Cannot add a row if there are no headers (e.g., no JSON processed yet)
+        return prevData;
+      }
+      const newRow = {};
+      prevData.headers.forEach(header => {
+        if (header === 'Test Case Name') {
+          // Find the highest existing TC number to generate a new unique one
+          let maxTcNum = 0;
+          prevData.rows.forEach(r => {
+            if (r['Test Case Name'] && r['Test Case Name'].startsWith('TC_')) {
+              const num = parseInt(r['Test Case Name'].substring(3), 10);
+              if (!isNaN(num) && num > maxTcNum) {
+                maxTcNum = num;
+              }
+            }
+          });
+          newRow[header] = `TC_${String(maxTcNum + 1).padStart(2, '0')}`;
+        } else {
+          newRow[header] = ''; // Or null, or some other default
+        }
+      });
+      return {
+        ...prevData,
+        rows: [...prevData.rows, newRow]
+      };
+    });
+  };
+
+  const handleDeleteRow = (rowIndexToDelete) => {
+    setTableData(prevData => ({
+      ...prevData,
+      rows: prevData.rows.filter((_, index) => index !== rowIndexToDelete)
+    }));
+  };
+
   return (
     <div className="App">
       <HomePage onJsonParsed={handleJsonSuccessfullyParsed} />
@@ -53,10 +91,17 @@ function App() {
       {tableData.headers && tableData.headers.length > 0 && (
         <div className="container mx-auto p-4 mt-4 border-t border-gray-200">
           <h2 className="text-xl font-semibold mb-2">Generated Test Cases Table</h2>
+          <button 
+            onClick={handleAddRow}
+            className="mb-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+          >
+            Add New Row
+          </button>
           <JsonTable 
             headers={tableData.headers} 
             rows={tableData.rows} 
             onCellChange={handleCellChange}
+            onDeleteRow={handleDeleteRow}
           />
         </div>
       )}

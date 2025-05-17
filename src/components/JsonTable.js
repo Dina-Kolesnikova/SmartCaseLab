@@ -1,6 +1,6 @@
 import React from 'react';
 
-const JsonTable = ({ headers, rows, onCellChange }) => {
+const JsonTable = ({ headers, rows, onCellChange, onDeleteRow }) => {
   if (!headers || headers.length === 0) {
     return <p className="text-gray-500">No data to display or JSON is empty.</p>;
   }
@@ -24,6 +24,7 @@ const JsonTable = ({ headers, rows, onCellChange }) => {
                 {header.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </th>
             ))}
+            <th scope="col" className="px-6 py-3 whitespace-nowrap">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -63,11 +64,11 @@ const JsonTable = ({ headers, rows, onCellChange }) => {
 
                   const inputClasses = [
                     inputSpecificWidthClass, // Use the determined width class
+                    "min-w-20", // Add a minimum width to all inputs (5rem or 80px)
                     "px-1", 
                     "py-0.5", 
-                    "border", 
-                    "border-transparent", 
-                    "hover:border-gray-300", 
+                    "border", // Ensures border properties are applied
+                    "border-gray-300", // Default visible border
                     "focus:border-blue-500", 
                     "focus:ring-1", 
                     "focus:ring-blue-500", 
@@ -89,11 +90,21 @@ const JsonTable = ({ headers, rows, onCellChange }) => {
                     </td>
                   );
                 })}
+                <td className="px-6 py-4 whitespace-nowrap">
+                  {onDeleteRow && (
+                    <button 
+                      onClick={() => onDeleteRow(rowIndex)}
+                      className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </td>
               </tr>
             ))
           ) : (
             <tr>
-              <td colSpan={headers.length} className="px-6 py-4 text-center text-gray-500">
+              <td colSpan={headers.length + 1} className="px-6 py-4 text-center text-gray-500">
                 No rows to display. (Input might have been empty or not an object/array of objects).
               </td>
             </tr>
