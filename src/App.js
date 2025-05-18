@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import HomePage from './components/HomePage';
 import JsonTable from './components/JsonTable';
 import { parseJsonData } from './parserModule';
+import { faker } from '@faker-js/faker'; // Import faker
 import './index.css'; // Assuming Tailwind CSS is set up here
 
 function App() {
@@ -80,6 +81,61 @@ function App() {
     }));
   };
 
+  const handleAutoGenerateCell = (rowIndex, columnId) => {
+    setTableData(prevData => {
+      const newRows = prevData.rows.map((row, rIndex) => {
+        if (rIndex === rowIndex) {
+          const newRow = { ...row };
+          let generatedValue;
+          const lowerColumnId = columnId.toLowerCase();
+
+          if (lowerColumnId.includes('email')) {
+            generatedValue = faker.internet.email();
+          } else if (lowerColumnId.includes('name')) {
+            generatedValue = faker.person.fullName();
+          } else if (lowerColumnId.includes('id') && !lowerColumnId.includes('uuid')) {
+            generatedValue = faker.string.alphanumeric({ length: 8, casing: 'upper' });
+          } else if (lowerColumnId.includes('uuid') || lowerColumnId.includes('guid')) {
+            generatedValue = faker.string.uuid();
+          } else if (lowerColumnId.includes('phone') || lowerColumnId.includes('number')) {
+            generatedValue = faker.phone.number();
+          } else if (lowerColumnId.includes('address')) {
+            generatedValue = faker.location.streetAddress();
+          } else if (lowerColumnId.includes('city')) {
+            generatedValue = faker.location.city();
+          } else if (lowerColumnId.includes('zip') || lowerColumnId.includes('postal')) {
+            generatedValue = faker.location.zipCode();
+          } else if (lowerColumnId.includes('country')) {
+            generatedValue = faker.location.country();
+          } else if (lowerColumnId.includes('date')) {
+            generatedValue = faker.date.past().toLocaleDateString();
+          } else if (lowerColumnId.includes('url') || lowerColumnId.includes('website')) {
+            generatedValue = faker.internet.url();
+          } else if (lowerColumnId.includes('price') || lowerColumnId.includes('amount')) {
+            generatedValue = faker.commerce.price();
+          } else if (lowerColumnId.includes('description') || lowerColumnId.includes('comment') || lowerColumnId.includes('text')) {
+            generatedValue = faker.lorem.sentence();
+          } else if (columnId === 'Test Case Name') {
+            generatedValue = newRow[columnId]; // Keep existing
+          } else {
+            generatedValue = faker.lorem.words(3);
+          }
+
+          // Don't overwrite if the column is Test Case Name or if original was an object/array (read-only)
+          const originalValue = row[columnId];
+          if (columnId !== 'Test Case Name' && (typeof originalValue !== 'object' || originalValue === null)) {
+            newRow[columnId] = generatedValue;
+          } else if (columnId !== 'Test Case Name' && originalValue === null) { 
+            newRow[columnId] = generatedValue;
+          }
+          return newRow;
+        }
+        return row;
+      });
+      return { ...prevData, rows: newRows };
+    });
+  };
+
   return (
     <div className="App">
       <HomePage onJsonParsed={handleJsonSuccessfullyParsed} />
@@ -102,6 +158,7 @@ function App() {
             rows={tableData.rows} 
             onCellChange={handleCellChange}
             onDeleteRow={handleDeleteRow}
+            onAutoGenerateCell={handleAutoGenerateCell}
           />
         </div>
       )}

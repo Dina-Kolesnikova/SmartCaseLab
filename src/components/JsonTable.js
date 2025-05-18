@@ -1,6 +1,6 @@
 import React from 'react';
 
-const JsonTable = ({ headers, rows, onCellChange, onDeleteRow }) => {
+const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCell }) => {
   if (!headers || headers.length === 0) {
     return <p className="text-gray-500">No data to display or JSON is empty.</p>;
   }
@@ -59,34 +59,52 @@ const JsonTable = ({ headers, rows, onCellChange, onDeleteRow }) => {
                   let inputSpecificWidthClass = "w-full"; // Default to full width
 
                   if (header.toLowerCase() === 'id') { // Check for 'id' case-insensitively
-                    inputSpecificWidthClass = "w-48"; // Apply a fixed width for ID column, increased from w-40
+                    inputSpecificWidthClass = "w-48"; 
                   }
 
+                  const inputContainerClasses = [
+                    "flex",
+                    "items-center",
+                    "relative", // For positioning the button if needed
+                  ];
+
                   const inputClasses = [
-                    inputSpecificWidthClass, // Use the determined width class
-                    "min-w-20", // Add a minimum width to all inputs (5rem or 80px)
+                    inputSpecificWidthClass,
+                    "min-w-20", 
                     "px-1", 
                     "py-0.5", 
-                    "border", // Ensures border properties are applied
-                    "border-gray-300", // Default visible border
+                    "border", 
+                    "border-gray-300", 
                     "focus:border-blue-500", 
                     "focus:ring-1", 
                     "focus:ring-blue-500", 
                     "rounded-sm", 
                     "bg-transparent",
-                    "truncate" 
+                    "truncate",
+                    !isReadOnly && onAutoGenerateCell ? "pr-7" : "" // Add padding to the right if button is present
                   ];
 
                   return (
                     <td key={`${rowIndex}-${header}`} className="px-6 py-4">
-                      <input 
-                        type="text"
-                        value={displayValue} // displayValue is already a string or 'null' string
-                        onChange={(e) => handleInputChange(rowIndex, header, e)}
-                        className={inputClasses.join(" ")}
-                        readOnly={isReadOnly}
-                        title={inputTitle}
-                      />
+                      <div className={inputContainerClasses.join(" ")}>
+                        <input 
+                          type="text"
+                          value={displayValue}
+                          onChange={(e) => handleInputChange(rowIndex, header, e)}
+                          className={inputClasses.filter(Boolean).join(" ")}
+                          readOnly={isReadOnly}
+                          title={inputTitle}
+                        />
+                        {!isReadOnly && onAutoGenerateCell && (
+                          <button
+                            onClick={() => onAutoGenerateCell(rowIndex, header)}
+                            className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
+                            title={`Auto-generate for this cell`}
+                          >
+                            🪄
+                          </button>
+                        )}
+                      </div>
                     </td>
                   );
                 })}
