@@ -1,14 +1,62 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import HomePage from './components/HomePage';
 import JsonTable from './components/JsonTable';
 import { parseJsonData } from './parserModule';
 import { faker } from '@faker-js/faker'; // Import faker
+import Papa from 'papaparse'; // Import papaparse
+import { unflatten } from 'flat'; // Removed flatten as it's unused here
 import './index.css'; // Assuming Tailwind CSS is set up here
+
+const DRAFT_STORAGE_KEY = 'smartcaselab_draft_v1';
+const REQUIRED_FIELDS_STORAGE_KEY = 'smartcaselab_requiredFields_v1';
+
+// Helper function to trigger file download
+const downloadFile = (filename, content, mimeType) => {
+  const blob = new Blob([content], { type: mimeType });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
+};
+
+// Helper function to safely stringify values for CSV
+const safeStringify = (value) => {
+  if (value === null || value === undefined) {
+    return 'null'; // Represent null/undefined as the string "null"
+  }
+  if (typeof value === 'object') {
+    // For arrays and objects, return their JSON string representation
+    return JSON.stringify(value);
+  }
+  // For primitives (string, number, boolean), return as is.
+  // PapaParse will handle quoting for strings if they contain delimiters/newlines.
+  return value;
+};
 
 function App() {
   const [tableData, setTableData] = useState({ headers: [], rows: [] });
   const [currentJson, setCurrentJson] = useState(null);
   const [error, setError] = useState('');
+  const [draftMessage, setDraftMessage] = useState('');
+
+  // State for required fields
+  const [requiredFields, setRequiredFields] = useState(() => {
+    const savedRequiredFields = localStorage.getItem(REQUIRED_FIELDS_STORAGE_KEY);
+    return savedRequiredFields ? JSON.parse(savedRequiredFields) : {};
+  });
+
+  // Auto-load draft on initial mount
+  useEffect(() => {
+    handleLoadDraft(true);
+  }, []);
+
+  // Effect to save requiredFields to localStorage
+  useEffect(() => {
+    localStorage.setItem(REQUIRED_FIELDS_STORAGE_KEY, JSON.stringify(requiredFields));
+  }, [requiredFields]);
 
   const handleJsonSuccessfullyParsed = (jsonData) => {
     try {
@@ -24,6 +72,7 @@ function App() {
       setTableData({ headers: [], rows: [] });
       setCurrentJson(null);
     }
+    setTimeout(() => setDraftMessage(''), 3000);
   };
 
   const handleCellChange = (rowIndex, columnId, value) => {
@@ -136,6 +185,242 @@ function App() {
     });
   };
 
+  const handleSaveDraft = () => {
+    if (!tableData.headers || tableData.headers.length === 0) {
+      setDraftMessage('No data to save.');
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+    try {
+      const draftData = {
+        tableData,
+        currentJson,
+        timestamp: new Date().toISOString(),
+      };
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftData));
+      setDraftMessage('Draft saved successfully!');
+      console.log('Draft saved:', draftData);
+    } catch (e) {
+      console.error('Failed to save draft:', e);
+      setDraftMessage('Error saving draft. See console for details.');
+    }
+    setTimeout(() => setDraftMessage(''), 3000); // Clear message after 3 seconds
+  };
+
+  const handleLoadDraft = (isAutoLoad = false) => {
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const draftData = JSON.parse(savedDraft);
+        if (draftData && draftData.tableData && draftData.currentJson) {
+          setTableData(draftData.tableData);
+          setCurrentJson(draftData.currentJson);
+          setError(''); // Clear any previous errors
+          if (!isAutoLoad) {
+            setDraftMessage(`Draft from ${new Date(draftData.timestamp).toLocaleString()} loaded.`);
+          }
+          console.log('Draft loaded:', draftData);
+        } else {
+          if (!isAutoLoad) setDraftMessage('Invalid draft data found.');
+          console.warn('Invalid draft data structure:', draftData);
+        }
+      } else {
+        if (!isAutoLoad) setDraftMessage('No draft found.');
+      }
+    } catch (e) {
+      console.error('Failed to load draft:', e);
+      if (!isAutoLoad) setDraftMessage('Error loading draft. See console for details.');
+      // Optionally clear potentially corrupted draft
+      // localStorage.removeItem(DRAFT_STORAGE_KEY);
+    }
+    if (!isAutoLoad) {
+        setTimeout(() => setDraftMessage(''), 3000);
+    }
+  };
+
+  const handleExportJson = () => {
+    if (!tableData.rows || tableData.rows.length === 0) {
+      setDraftMessage('No data to export.');
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+    try {
+      const rowsToExport = tableData.rows.map(row => {
+        // eslint-disable-next-line no-useless-computed-key
+        const { ['Test Case Name']: _, ...restOfRow } = row; // Exclude 'Test Case Name'
+        return unflatten(restOfRow);
+      });
+      
+      // If original input was a single object and we only have one row, export a single object.
+      // Otherwise, export an array of objects. This handles most use cases.
+      const jsonDataToExport = (currentJson && !Array.isArray(currentJson) && rowsToExport.length === 1)
+        ? rowsToExport[0]
+        : rowsToExport;
+
+      const jsonString = JSON.stringify(jsonDataToExport, null, 2);
+      downloadFile('test_cases.json', jsonString, 'application/json');
+      setDraftMessage('JSON exported successfully!');
+    } catch (e) {
+      console.error('Failed to export JSON:', e);
+      setDraftMessage('Error exporting JSON. See console.');
+    }
+    setTimeout(() => setDraftMessage(''), 3000);
+  };
+
+  const handleExportCsv = () => {
+    if (!tableData.rows || tableData.rows.length === 0) {
+      setDraftMessage('No data to export.');
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+    if (!currentJson) {
+      setDraftMessage('Original JSON structure not available for CSV export in the desired format.');
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+
+    try {
+      const schemaReferenceObject = Array.isArray(currentJson) ? (currentJson[0] || {}) : currentJson;
+      if (typeof schemaReferenceObject !== 'object' || schemaReferenceObject === null || Object.keys(schemaReferenceObject).length === 0) {
+        setDraftMessage('Cannot determine a valid schema from original JSON to build CSV.');
+        setTimeout(() => setDraftMessage(''), 3000);
+        return;
+      }
+
+      const topLevelCsvHeaders = ['Test Case Name', ...Object.keys(schemaReferenceObject)];
+
+      const processedRowsForCsv = tableData.rows.map(flatRowData => {
+        const newCsvRow = { 'Test Case Name': flatRowData['Test Case Name'] }; // Start with Test Case Name
+
+        for (const topLevelKey in schemaReferenceObject) {
+          if (Object.prototype.hasOwnProperty.call(schemaReferenceObject, topLevelKey)) {
+            const originalValue = schemaReferenceObject[topLevelKey];
+            
+            if (typeof originalValue === 'object' && originalValue !== null) {
+              // Reconstruct the complex object/array for this topLevelKey from the flatRowData
+              let relevantFlatData = {};
+              for (const flatKey in flatRowData) {
+                if (flatKey === topLevelKey || flatKey.startsWith(topLevelKey + '.')) {
+                  relevantFlatData[flatKey] = flatRowData[flatKey];
+                }
+              }
+              // Unflatten only the portion relevant to this topLevelKey
+              // The result of unflatten might be { topLevelKey: { ... actual data ...} }
+              // or if topLevelKey itself was a root of a simple value in flatRowData (unlikely for complex)
+              // we need to ensure we extract the correct structure that unflatten returns.
+              const unflattenedPortion = unflatten(relevantFlatData);
+              newCsvRow[topLevelKey] = safeStringify(unflattenedPortion[topLevelKey]);
+            } else {
+              // For primitives, directly get from flatRowData (which should have this topLevelKey)
+              newCsvRow[topLevelKey] = safeStringify(flatRowData[topLevelKey]);
+            }
+          }
+        }
+        return newCsvRow;
+      });
+
+      const csvString = Papa.unparse({
+        fields: topLevelCsvHeaders,
+        data: processedRowsForCsv
+      });
+      downloadFile('test_cases_structured.csv', csvString, 'text/csv;charset=utf-8;');
+      setDraftMessage('Structured CSV exported successfully!');
+    } catch (e) {
+      console.error('Failed to export structured CSV:', e);
+      setDraftMessage('Error exporting structured CSV. See console.');
+    }
+    setTimeout(() => setDraftMessage(''), 3000);
+  };
+
+  const handleExportPostmanTemplate = () => {
+    if (!currentJson) {
+      setDraftMessage('Original JSON structure not available for template generation.');
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+
+    try {
+      const schemaReferenceObject = Array.isArray(currentJson) ? (currentJson[0] || {}) : currentJson;
+      if (typeof schemaReferenceObject !== 'object' || schemaReferenceObject === null || Object.keys(schemaReferenceObject).length === 0) {
+        setDraftMessage('Cannot determine a valid schema from original JSON to build template.');
+        setTimeout(() => setDraftMessage(''), 3000);
+        return;
+      }
+
+      const templateBodyPlaceholders = {};
+      const topLevelKeysForDescription = [];
+
+      for (const key in schemaReferenceObject) {
+        if (Object.prototype.hasOwnProperty.call(schemaReferenceObject, key)) {
+          topLevelKeysForDescription.push(key);
+          const originalValue = schemaReferenceObject[key];
+          const originalType = typeof originalValue;
+
+          if (originalType === 'string') {
+            templateBodyPlaceholders[key] = `{{${key}}}`;
+          } else {
+            // For numbers, booleans, null, objects, arrays
+            templateBodyPlaceholders[key] = `__RAW_PLACEHOLDER_START__${key}__RAW_PLACEHOLDER_END__`;
+          }
+        }
+      }
+      
+      if (topLevelKeysForDescription.length === 0) {
+        setDraftMessage('No top-level keys found in the schema to generate a template.');
+        setTimeout(() => setDraftMessage(''), 3000);
+        return;
+      }
+
+      let rawJsonBody = JSON.stringify(templateBodyPlaceholders, null, 2);
+      rawJsonBody = rawJsonBody.replace(/"__RAW_PLACEHOLDER_START__(.*?)__RAW_PLACEHOLDER_END__"/g, '{{$1}}');
+
+      const postmanRequest = {
+        info: {
+          name: "SmartCaseLab Generated Request",
+          schema: "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+          description: `Generated Postman request template. Top-level variables: ${topLevelKeysForDescription.join(', ')}. Ensure your CSV has corresponding columns with appropriate (stringified if complex) values.`
+        },
+        item: [{
+            name: "Sample Request (Change URL and Method)",
+            request: {
+                method: "POST", // Default method
+                header: [
+                    { "key": "Content-Type", "value": "application/json" }
+                ],
+                body: {
+                    mode: "raw",
+                    raw: rawJsonBody
+                },
+                url: {
+                    raw: "YOUR_API_ENDPOINT_HERE",
+                    host: [ "YOUR_API_ENDPOINT_HERE" ]
+                },
+                description: "This is a sample request. Please update the URL, method, and other details as needed."
+            }
+        }]
+      };
+
+      const postmanCollectionString = JSON.stringify(postmanRequest, null, 2);
+      downloadFile('postman_collection.json', postmanCollectionString, 'application/json');
+      setDraftMessage('Postman collection template exported successfully!');
+
+    } catch (e) {
+      console.error('Failed to export Postman template:', e);
+      setDraftMessage('Error exporting Postman template. See console.');
+    }
+    setTimeout(() => setDraftMessage(''), 3000);
+  };
+
+  const handleToggleRequiredField = (columnId) => {
+    // Don't allow toggling for 'Test Case Name' column
+    if (columnId === 'Test Case Name') return;
+
+    setRequiredFields(prev => ({
+      ...prev,
+      [columnId]: !prev[columnId] // Toggle the boolean value
+    }));
+  };
+
   return (
     <div className="App">
       <HomePage onJsonParsed={handleJsonSuccessfullyParsed} />
@@ -144,9 +429,48 @@ function App() {
           <p><strong>Processing Error:</strong> {error}</p>
         </div>
       )}
+      {draftMessage && (
+        <div className={`container mx-auto p-4 mt-2 text-sm rounded ${draftMessage.startsWith('Error') || draftMessage.startsWith('Invalid') || draftMessage.startsWith('No data') || draftMessage.startsWith('No draft') ? 'text-red-700 bg-red-100 border border-red-400' : 'text-green-700 bg-green-100 border border-green-400'}`}>
+          {draftMessage}
+        </div>
+      )}
       {tableData.headers && tableData.headers.length > 0 && (
         <div className="container mx-auto p-4 mt-4 border-t border-gray-200">
-          <h2 className="text-xl font-semibold mb-2">Generated Test Cases Table</h2>
+          <div className="flex justify-between items-center mb-2">
+            <h2 className="text-xl font-semibold">Generated Test Cases Table</h2>
+            <div className="space-x-2">
+              <button
+                onClick={handleSaveDraft}
+                className="px-4 py-2 bg-blue-500 text-white text-sm rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+              >
+                Save Draft
+              </button>
+              <button
+                onClick={() => handleLoadDraft()}
+                className="px-4 py-2 bg-gray-500 text-white text-sm rounded hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50"
+              >
+                Load Draft
+              </button>
+              <button
+                onClick={handleExportJson}
+                className="px-4 py-2 bg-yellow-500 text-white text-sm rounded hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-opacity-50"
+              >
+                Export JSON
+              </button>
+              <button
+                onClick={handleExportCsv}
+                className="px-4 py-2 bg-teal-500 text-white text-sm rounded hover:bg-teal-600 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-opacity-50"
+              >
+                Export CSV
+              </button>
+              <button
+                onClick={handleExportPostmanTemplate}
+                className="px-4 py-2 bg-orange-500 text-white text-sm rounded hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50"
+              >
+                Export Postman Template
+              </button>
+            </div>
+          </div>
           <button 
             onClick={handleAddRow}
             className="mb-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
@@ -159,6 +483,8 @@ function App() {
             onCellChange={handleCellChange}
             onDeleteRow={handleDeleteRow}
             onAutoGenerateCell={handleAutoGenerateCell}
+            requiredFields={requiredFields}
+            onToggleRequiredField={handleToggleRequiredField}
           />
         </div>
       )}

@@ -1,6 +1,6 @@
 import React from 'react';
 
-const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCell }) => {
+const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField }) => {
   if (!headers || headers.length === 0) {
     return <p className="text-gray-500">No data to display or JSON is empty.</p>;
   }
@@ -19,11 +19,30 @@ const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCel
       <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
         <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
           <tr>
-            {headers.map((header) => (
-              <th key={header} scope="col" className="px-6 py-3 whitespace-nowrap">
-                {header.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              </th>
-            ))}
+            {headers.map((header) => {
+              const isRequired = requiredFields && requiredFields[header]; // Correctly check for property
+              const headerDisplayName = header.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              return (
+                <th key={header} scope="col" className="px-6 py-3 whitespace-nowrap">
+                  <div className="flex items-center">
+                    <span>{headerDisplayName}{isRequired ? <span className="text-red-500">*</span> : ''}</span>
+                    {header !== "Test Case Name" && onToggleRequiredField && (
+                      <button
+                        onClick={() => onToggleRequiredField(header)}
+                        title={`Toggle ${headerDisplayName} as required`}
+                        className={`ml-2 px-1 py-0.5 text-xs rounded focus:outline-none focus:ring-1 ${
+                          isRequired 
+                            ? "bg-red-500 hover:bg-red-600 text-white focus:ring-red-300" 
+                            : "bg-gray-200 hover:bg-gray-300 text-gray-700 focus:ring-gray-400"
+                        }`}
+                      >
+                        {isRequired ? "Required" : "Mark Req"}
+                      </button>
+                    )}
+                  </div>
+                </th>
+              );
+            })}
             <th scope="col" className="px-6 py-3 whitespace-nowrap">Actions</th>
           </tr>
         </thead>

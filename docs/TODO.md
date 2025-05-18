@@ -103,7 +103,7 @@ A React-based web app that takes a JSON object (uploaded or pasted), parses it, 
 
 ---
 
-### 7. 🎯 Add Field Rule Configuration (Presets)
+### 7. 🎯 Add Field Rule Configuration (Presets) - TO FINISH LATER
 
 **Tasks**
 - Allow user to define rules per key (e.g., VIN → 17-char string)
@@ -117,43 +117,43 @@ A React-based web app that takes a JSON object (uploaded or pasted), parses it, 
 
 ---
 
-### 8. 💾 Implement Local Draft Saving & Loading
+### 8. 💾 Implement Local Draft Saving & Loading [DONE]
 
 **Tasks**
-- Save current state (rows, field rules) to LocalStorage
-- Add "Save Draft" and "Load Draft" buttons
+- [x] Save current state (rows, field rules) to LocalStorage
+- [x] Add "Save Draft" and "Load Draft" buttons
 
 **Acceptance Criteria**
-- User can save and resume work
-- Draft persists on reload
-- No data loss between sessions
+- [x] User can save and resume work
+- [x] Draft persists on reload
+- [x] No data loss between sessions
 
 ---
 
-### 9. 📤 Export Table to CSV and JSON
+### 9. 📤 Export Table to CSV and JSON [DONE]
 
 **Tasks**
-- Format data into proper JSON (same as input structure)
-- Flatten and export table to CSV for Postman
-- Ensure special handling for arrays
+- [x] Format data into proper JSON (same as input structure)
+- [x] Flatten and export table to CSV for Postman
+- [x] Ensure special handling for arrays
 
 **Acceptance Criteria**
-- Exported JSON matches original schema
-- Exported CSV opens in Postman Runner without error
-- User receives file download when clicking export
+- [x] Exported JSON matches original schema
+- [x] Exported CSV opens in Postman Runner without error
+- [x] User receives file download when clicking export
 
 ---
 
-### 10. 🧪 Generate Postman-Compatible Request Template (Optional)
+### 10. 🧪 Generate Postman-Compatible Request Template (Optional) [DONE]
 
 **Tasks**
-- Generate example cURL or Postman request with variables (e.g., `{{pickup_info.name}}`)
-- Use table headers as variable names
+- [x] Generate example cURL or Postman request with variables (e.g., `{{pickup_info.name}}`)
+- [x] Use table headers as variable names
 
 **Acceptance Criteria**
-- Postman request contains placeholders from test data
-- Sample collection/request is downloadable or copy-pasteable
-- Variable names are consistent with table headers
+- [x] Postman request contains placeholders from test data
+- [x] Sample collection/request is downloadable or copy-pasteable
+- [x] Variable names are consistent with table headers
 
 ---
 
