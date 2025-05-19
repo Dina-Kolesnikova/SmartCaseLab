@@ -1,8 +1,38 @@
 import React from 'react';
 
-const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField }) => {
-  if (!headers || headers.length === 0) {
-    return <p className="text-gray-500">No data to display or JSON is empty.</p>;
+const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField, onCopyFromPreviousRow }) => {
+  // Determine if there's any data to display based on JSON headers or manual headers
+  const hasJsonHeaders = headers && headers.length > 0;
+  const hasManualHeaders = manualHeaders && manualHeaders.length > 0;
+  const hasAnyData = hasJsonHeaders || hasManualHeaders;
+
+  if (!hasAnyData && (!rows || rows.length === 0)) {
+    return <p className="text-gray-500">No data to display. Process JSON or add manual columns.</p>;
+  }
+
+  // Construct displayedHeaders in the desired order:
+  // 1. Test Case Name (if exists in original headers)
+  // 2. Manual Headers
+  // 3. Remaining Original Headers
+  let displayedHeaders = [];
+  const testCaseNameHeader = 'Test Case Name';
+  let originalHeaders = headers || []; // Ensure headers is an array even if null/undefined
+
+  if (originalHeaders.includes(testCaseNameHeader)) {
+    displayedHeaders.push(testCaseNameHeader);
+  }
+  displayedHeaders = [...displayedHeaders, ...manualHeaders];
+  originalHeaders.forEach(header => {
+    if (header !== testCaseNameHeader && !manualHeaders.includes(header)) {
+      displayedHeaders.push(header);
+    }
+  });
+  
+  // If displayedHeaders is empty (e.g. only manual headers that are empty, and no json headers yet) 
+  // but rows might exist (e.g. after clearing JSON but keeping manual structure), we might need a different check or rely on rows also being empty.
+  // For now, if displayedHeaders is empty, it implies no columns to show headers for.
+  if (displayedHeaders.length === 0 && (!rows || rows.length === 0)) {
+     return <p className="text-gray-500">No columns defined. Process JSON or add manual columns.</p>;
   }
 
   const handleInputChange = (rowIndex, headerKey, event) => {
@@ -19,7 +49,8 @@ const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCel
       <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
         <thead className="text-xs text-gray-700 uppercase bg-gray-50 dark:bg-gray-700 dark:text-gray-400">
           <tr>
-            {headers.map((header) => {
+            <th scope="col" className="px-6 py-3 whitespace-nowrap">Actions</th>
+            {displayedHeaders.map((header) => {
               const isRequired = requiredFields && requiredFields[header]; // Correctly check for property
               const headerDisplayName = header.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
               return (
@@ -43,14 +74,32 @@ const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCel
                 </th>
               );
             })}
-            <th scope="col" className="px-6 py-3 whitespace-nowrap">Actions</th>
           </tr>
         </thead>
         <tbody>
           {rows && rows.length > 0 ? (
             rows.map((row, rowIndex) => (
               <tr key={rowIndex} className="bg-white border-b dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600">
-                {headers.map((header) => {
+                <td className="px-6 py-4 whitespace-nowrap space-x-1">
+                  {onDeleteRow && (
+                    <button 
+                      onClick={() => onDeleteRow(rowIndex)}
+                      className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                    >
+                      Delete
+                    </button>
+                  )}
+                  {onCopyFromPreviousRow && rowIndex > 0 && (
+                    <button
+                      onClick={() => onCopyFromPreviousRow(rowIndex)}
+                      title="Copy data from the row above (excluding Test Case Name)"
+                      className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                    >
+                      Copy Prev
+                    </button>
+                  )}
+                </td>
+                {displayedHeaders.map((header) => {
                   const cellValue = row[header];
                   let displayValue;
                   
@@ -127,21 +176,11 @@ const JsonTable = ({ headers, rows, onCellChange, onDeleteRow, onAutoGenerateCel
                     </td>
                   );
                 })}
-                <td className="px-6 py-4 whitespace-nowrap">
-                  {onDeleteRow && (
-                    <button 
-                      onClick={() => onDeleteRow(rowIndex)}
-                      className="px-3 py-1 bg-red-500 text-white text-xs rounded hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
-                    >
-                      Delete
-                    </button>
-                  )}
-                </td>
               </tr>
             ))
           ) : (
             <tr>
-              <td colSpan={headers.length + 1} className="px-6 py-4 text-center text-gray-500">
+              <td colSpan={displayedHeaders.length + 1} className="px-6 py-4 text-center text-gray-500">
                 No rows to display. (Input might have been empty or not an object/array of objects).
               </td>
             </tr>

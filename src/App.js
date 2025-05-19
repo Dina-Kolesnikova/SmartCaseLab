@@ -9,6 +9,7 @@ import './index.css'; // Assuming Tailwind CSS is set up here
 
 const DRAFT_STORAGE_KEY = 'smartcaselab_draft_v1';
 const REQUIRED_FIELDS_STORAGE_KEY = 'smartcaselab_requiredFields_v1';
+const MANUAL_HEADERS_STORAGE_KEY = 'smartcaselab_manualHeaders_v1'; // Key for manual headers
 
 // Helper function to trigger file download
 const downloadFile = (filename, content, mimeType) => {
@@ -41,11 +42,17 @@ function App() {
   const [currentJson, setCurrentJson] = useState(null);
   const [error, setError] = useState('');
   const [draftMessage, setDraftMessage] = useState('');
+  const [newManualColumnName, setNewManualColumnName] = useState(''); // State for the new column name input
 
   // State for required fields
   const [requiredFields, setRequiredFields] = useState(() => {
     const savedRequiredFields = localStorage.getItem(REQUIRED_FIELDS_STORAGE_KEY);
     return savedRequiredFields ? JSON.parse(savedRequiredFields) : {};
+  });
+
+  const [manualHeaders, setManualHeaders] = useState(() => {
+    const savedManualHeaders = localStorage.getItem(MANUAL_HEADERS_STORAGE_KEY);
+    return savedManualHeaders ? JSON.parse(savedManualHeaders) : [];
   });
 
   // Auto-load draft on initial mount
@@ -57,6 +64,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem(REQUIRED_FIELDS_STORAGE_KEY, JSON.stringify(requiredFields));
   }, [requiredFields]);
+
+  // Effect to save manualHeaders to localStorage
+  useEffect(() => {
+    localStorage.setItem(MANUAL_HEADERS_STORAGE_KEY, JSON.stringify(manualHeaders));
+  }, [manualHeaders]);
 
   const handleJsonSuccessfullyParsed = (jsonData) => {
     try {
@@ -94,11 +106,18 @@ function App() {
 
   const handleAddRow = () => {
     setTableData(prevData => {
-      if (!prevData.headers || prevData.headers.length === 0) {
-        // Cannot add a row if there are no headers (e.g., no JSON processed yet)
+      if ((!prevData.headers || prevData.headers.length === 0) && manualHeaders.length === 0) {
+        // Cannot add a row if there are no headers (neither JSON-derived nor manual)
+        setDraftMessage("Cannot add row: No columns defined yet. Please process JSON or add a manual column.");
+        setTimeout(() => setDraftMessage(''), 3000);
         return prevData;
       }
       const newRow = {};
+      // Initialize manual headers
+      manualHeaders.forEach(header => {
+        newRow[header] = '';
+      });
+      // Initialize JSON-derived headers
       prevData.headers.forEach(header => {
         if (header === 'Test Case Name') {
           // Find the highest existing TC number to generate a new unique one
@@ -186,7 +205,7 @@ function App() {
   };
 
   const handleSaveDraft = () => {
-    if (!tableData.headers || tableData.headers.length === 0) {
+    if ((!tableData.headers || tableData.headers.length === 0) && manualHeaders.length === 0) {
       setDraftMessage('No data to save.');
       setTimeout(() => setDraftMessage(''), 3000);
       return;
@@ -195,6 +214,8 @@ function App() {
       const draftData = {
         tableData,
         currentJson,
+        manualHeaders, // Save manualHeaders
+        requiredFields, // Also save requiredFields with the draft for consistency
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftData));
@@ -212,9 +233,11 @@ function App() {
       const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
       if (savedDraft) {
         const draftData = JSON.parse(savedDraft);
-        if (draftData && draftData.tableData && draftData.currentJson) {
+        if (draftData && draftData.tableData) { // currentJson can be null if only manual cols exist
           setTableData(draftData.tableData);
-          setCurrentJson(draftData.currentJson);
+          setCurrentJson(draftData.currentJson || null);
+          setManualHeaders(draftData.manualHeaders || []); // Load manualHeaders
+          setRequiredFields(draftData.requiredFields || {}); // Load requiredFields
           setError(''); // Clear any previous errors
           if (!isAutoLoad) {
             setDraftMessage(`Draft from ${new Date(draftData.timestamp).toLocaleString()} loaded.`);
@@ -411,6 +434,33 @@ function App() {
     setTimeout(() => setDraftMessage(''), 3000);
   };
 
+  const handleCopyFromPreviousRow = (rowIndexToPopulate) => {
+    setTableData(prevData => {
+      if (rowIndexToPopulate <= 0 || rowIndexToPopulate >= prevData.rows.length) {
+        // Cannot copy if it's the first row, or index is out of bounds, or no previous row exists
+        console.warn("Cannot copy from previous row: invalid rowIndexToPopulate or no previous row.");
+        return prevData;
+      }
+
+      const previousRowData = prevData.rows[rowIndexToPopulate - 1];
+      const currentRowData = prevData.rows[rowIndexToPopulate]; 
+      
+      // Create a new object for updatedRow to ensure all keys from previousRowData are copied,
+      // including manual header keys that might not be on currentRowData if it was just added.
+      const updatedRow = { ...previousRowData };
+      
+      // Preserve current TC Name if it exists (it should from handleAddRow)
+      if (currentRowData['Test Case Name']) {
+         updatedRow['Test Case Name'] = currentRowData['Test Case Name'];
+      }
+
+      const newRows = [...prevData.rows];
+      newRows[rowIndexToPopulate] = updatedRow;
+
+      return { ...prevData, rows: newRows };
+    });
+  };
+
   const handleToggleRequiredField = (columnId) => {
     // Don't allow toggling for 'Test Case Name' column
     if (columnId === 'Test Case Name') return;
@@ -419,6 +469,43 @@ function App() {
       ...prev,
       [columnId]: !prev[columnId] // Toggle the boolean value
     }));
+  };
+
+  const handleClearAllTestCases = () => {
+    if (window.confirm("Are you sure you want to clear all test cases and custom columns? This action cannot be undone.")) {
+      setTableData({ headers: [], rows: [] });
+      setCurrentJson(null);
+      setManualHeaders([]); // Clear manual headers
+      setError('');
+      setRequiredFields({});
+      setTimeout(() => setDraftMessage(''), 3000);
+    }
+  };
+
+  const handleAddManualColumnInternal = () => {
+    const columnName = newManualColumnName.trim();
+    if (!columnName) {
+      setDraftMessage("Column name cannot be empty.");
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+    if (manualHeaders.includes(columnName) || tableData.headers.includes(columnName)) {
+      setDraftMessage(`Column "${columnName}" already exists.`);
+      setTimeout(() => setDraftMessage(''), 3000);
+      return;
+    }
+
+    setManualHeaders(prev => [...prev, columnName]);
+    setTableData(prevData => ({
+      ...prevData,
+      rows: prevData.rows.map(row => ({
+        ...row,
+        [columnName]: '' // Initialize new column with empty string for all existing rows
+      }))
+    }));
+    setNewManualColumnName(''); // Clear input field
+    setDraftMessage(`Custom column "${columnName}" added.`);
+    setTimeout(() => setDraftMessage(''), 3000);
   };
 
   return (
@@ -469,22 +556,52 @@ function App() {
               >
                 Export Postman Template
               </button>
+              {/* Add Clear All Test Cases button */}
+              <button
+                onClick={handleClearAllTestCases}
+                className="px-4 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                title="Clear all generated test cases and reset the table."
+              >
+                Clear All Cases
+              </button>
             </div>
           </div>
-          <button 
-            onClick={handleAddRow}
-            className="mb-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-          >
-            Add New Row
-          </button>
+          <div className="flex items-end mb-4 space-x-2"> {/* Changed items-center to items-end for better alignment with input */}
+            <button
+              onClick={handleAddRow}
+              disabled={(!tableData.headers || tableData.headers.length === 0) && manualHeaders.length === 0}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 disabled:bg-gray-300"
+            >
+              Add New Row
+            </button>
+            {/* UI for adding manual column */}
+            <div className="flex items-end space-x-2">
+              <input 
+                type="text"
+                value={newManualColumnName}
+                onChange={(e) => setNewManualColumnName(e.target.value)}
+                placeholder="New Column Name"
+                className="px-2 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              />
+              <button
+                onClick={handleAddManualColumnInternal}
+                disabled={tableData.rows.length === 0 && (!currentJson && manualHeaders.length === 0)} // Disable if no rows or no table structure at all
+                className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50 disabled:bg-gray-300"
+              >
+                Add Custom Column
+              </button>
+            </div>
+          </div>
           <JsonTable 
             headers={tableData.headers} 
+            manualHeaders={manualHeaders}
             rows={tableData.rows} 
             onCellChange={handleCellChange}
             onDeleteRow={handleDeleteRow}
             onAutoGenerateCell={handleAutoGenerateCell}
             requiredFields={requiredFields}
             onToggleRequiredField={handleToggleRequiredField}
+            onCopyFromPreviousRow={handleCopyFromPreviousRow}
           />
         </div>
       )}
