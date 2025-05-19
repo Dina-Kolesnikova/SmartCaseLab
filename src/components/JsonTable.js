@@ -1,6 +1,11 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import FieldRuleConfig from './FieldRuleConfig';
+import { generateTestData, detectFieldType } from '../utils/dataGenerator';
 
-const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField, onCopyFromPreviousRow }) => {
+const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField, onCopyFromPreviousRow, onAddRows, onRemoveFieldFromRow, onUndoRemoveField }) => {
+  const [selectedField, setSelectedField] = useState({ header: null, rowIndex: null });
+  const [isRuleConfigOpen, setIsRuleConfigOpen] = useState(false);
+
   // Determine if there's any data to display based on JSON headers or manual headers
   const hasJsonHeaders = headers && headers.length > 0;
   const hasManualHeaders = manualHeaders && manualHeaders.length > 0;
@@ -44,6 +49,79 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
     }
   };
 
+  const handleConfigureRules = (header, rowIndex = null) => {
+    setSelectedField({ header, rowIndex });
+    setIsRuleConfigOpen(true);
+  };
+
+  const handleSaveRules = (fieldName, rules) => {
+    const generatedValues = generateTestData(rules);
+    const { header, rowIndex } = selectedField; // Get the selected row index
+    
+    // Handle field removal first
+    if (rules.removeField || rules.removeObject) {
+      if (rowIndex !== null && onRemoveFieldFromRow) {
+        // Call parent to remove the field from the specific row
+        onRemoveFieldFromRow(rowIndex, fieldName);
+      }
+      
+      // If generating new rows after removal, create them without the field
+      if (rules.numberOfCases > 0) {
+        // Create new rows based on the row AFTER removal
+        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : { ...rows[0] }; // Use the modified row if available, otherwise first row
+        delete baseRow[fieldName]; // Ensure the base row for new cases doesn't have the field
+        
+        const newRows = Array(rules.numberOfCases).fill().map(() => ({ ...baseRow }));
+
+        if (onAddRows) {
+          onAddRows(newRows);
+        }
+      }
+
+    } else { // Handle data generation rules
+      if (rules.applyToExisting) {
+        // Apply rules to all existing rows (excluding the one being configured if it was specified)
+        const updatedRows = rows.map((row, index) => {
+          // Only apply to existing rows, skip if configuring a specific row and applyToExisting is false
+           if (rowIndex !== null && index !== rowIndex && !rules.applyToExisting) return row;
+
+          const newRow = { ...row };
+          newRow[fieldName] = generatedValues[index % generatedValues.length];
+          return newRow;
+        });
+        
+        // Update all applicable rows
+        if (onCellChange) {
+          updatedRows.forEach((row, rIndex) => {
+             // Only call onCellChange if the value actually changed or it's the row being configured
+             if (rIndex === rowIndex || rows[rIndex][fieldName] !== row[fieldName]){
+                onCellChange(rIndex, fieldName, row[fieldName]);
+             }
+          });
+        }
+      }
+      
+      // Generate additional new rows based on the rule
+      if (rules.numberOfCases > 0) {
+         // If a specific row was configured, base new rows on that row's current state
+        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : { ...rows[0] }; // Use the selected row state or the first row
+
+        const newRows = generatedValues.map(value => {
+          const rowToPopulate = { ...baseRow }; 
+          rowToPopulate[fieldName] = value;
+          return rowToPopulate;
+        });
+
+        // Call the parent component's onAddRows function to add the new rows
+        if (onAddRows) {
+          onAddRows(newRows);
+        }
+      }
+    }
+  };
+
+    
+
   return (
     <div className="overflow-x-auto shadow-md sm:rounded-lg mt-4">
       <table className="w-full text-sm text-left text-gray-500 dark:text-gray-400">
@@ -51,25 +129,27 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
           <tr>
             <th scope="col" className="px-6 py-3 whitespace-nowrap">Actions</th>
             {displayedHeaders.map((header) => {
-              const isRequired = requiredFields && requiredFields[header]; // Correctly check for property
+              const isRequired = requiredFields && requiredFields[header];
               const headerDisplayName = header.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
               return (
                 <th key={header} scope="col" className="px-6 py-3 whitespace-nowrap">
                   <div className="flex items-center">
                     <span>{headerDisplayName}{isRequired ? <span className="text-red-500">*</span> : ''}</span>
-                    {header !== "Test Case Name" && onToggleRequiredField && (
-                      <button
-                        onClick={() => onToggleRequiredField(header)}
-                        title={`Toggle ${headerDisplayName} as required`}
-                        className={`ml-2 px-1 py-0.5 text-xs rounded focus:outline-none focus:ring-1 ${
-                          isRequired 
-                            ? "bg-red-500 hover:bg-red-600 text-white focus:ring-red-300" 
-                            : "bg-gray-200 hover:bg-gray-300 text-gray-700 focus:ring-gray-400"
-                        }`}
-                      >
-                        {isRequired ? "Required" : "Mark Req"}
-                      </button>
-                    )}
+                    <div className="ml-2 space-x-1">
+                      {header !== "Test Case Name" && onToggleRequiredField && (
+                        <button
+                          onClick={() => onToggleRequiredField(header)}
+                          title={`Toggle ${headerDisplayName} as required`}
+                          className={`px-1 py-0.5 text-xs rounded focus:outline-none focus:ring-1 ${
+                            isRequired 
+                              ? "bg-red-500 hover:bg-red-600 text-white focus:ring-red-300" 
+                              : "bg-gray-200 hover:bg-gray-300 text-gray-700 focus:ring-gray-400"
+                          }`}
+                        >
+                          {isRequired ? "Required" : "Mark Req"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </th>
               );
@@ -102,58 +182,62 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
                 {displayedHeaders.map((header) => {
                   const cellValue = row[header];
                   let displayValue;
+                  let cellClasses = "px-6 py-4"; // Default cell classes
+                  let content;
                   
-                  if (typeof cellValue === 'boolean') {
-                    displayValue = String(cellValue); // "true" or "false"
-                  } else if (cellValue === null) {
-                    displayValue = 'null'; // Explicitly show "null"
-                  } else if (cellValue === undefined) {
-                    displayValue = ''; // Undefined becomes empty string
-                  } else if (typeof cellValue === 'object') {
-                    displayValue = JSON.stringify(cellValue); // Objects/arrays as JSON string
-                  } else {
-                    displayValue = String(cellValue); // Numbers, strings, etc.
-                  }
+                  // Declare these variables before they are potentially used in the JSX
+                  const isReadOnly = typeof cellValue === 'object' && cellValue !== null && cellValue !== undefined; // Also check for undefined
+                  let inputTitle = isReadOnly && cellValue !== undefined ? 
+                    "Direct editing of objects/arrays in cell is not supported." : 
+                    String(cellValue);
 
-                  const isReadOnly = typeof cellValue === 'object' && cellValue !== null;
-                  let inputTitle;
-                  
-                  if (isReadOnly) {
-                    inputTitle = "Direct editing of objects/arrays in cell is not supported.";
-                  } else {
-                    inputTitle = String(displayValue); 
-                  }
-
-                  let inputSpecificWidthClass = "w-full"; // Default to full width
-
-                  if (header.toLowerCase() === 'id') { // Check for 'id' case-insensitively
-                    inputSpecificWidthClass = "w-48"; 
+                  let inputSpecificWidthClass = "w-full";
+                  if (header.toLowerCase() === 'id') {
+                    inputSpecificWidthClass = "w-48";
                   }
 
                   const inputContainerClasses = [
                     "flex",
                     "items-center",
-                    "relative", // For positioning the button if needed
+                    "relative",
                   ];
 
                   const inputClasses = [
                     inputSpecificWidthClass,
-                    "min-w-20", 
-                    "px-1", 
-                    "py-0.5", 
-                    "border", 
-                    "border-gray-300", 
-                    "focus:border-blue-500", 
-                    "focus:ring-1", 
-                    "focus:ring-blue-500", 
-                    "rounded-sm", 
+                    "min-w-20",
+                    "px-1",
+                    "py-0.5",
+                    "border",
+                    "border-gray-300",
+                    "focus:border-blue-500",
+                    "focus:ring-1",
+                    "focus:ring-blue-500",
+                    "rounded-sm",
                     "bg-transparent",
                     "truncate",
-                    !isReadOnly && onAutoGenerateCell ? "pr-7" : "" // Add padding to the right if button is present
+                    "pr-7" // Always add padding for the rules button
                   ];
 
-                  return (
-                    <td key={`${rowIndex}-${header}`} className="px-6 py-4">
+                  if (cellValue === undefined) {
+                    displayValue = '[Removed]';
+                    cellClasses += " text-gray-400 italic"; // Add classes for removed state
+                    content = (
+                      <div className="flex items-center space-x-1">
+                        <span>{displayValue}</span>
+                        {onUndoRemoveField && (
+                           <button
+                            onClick={() => onUndoRemoveField(rowIndex, header)}
+                            className="px-1 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded focus:outline-none focus:ring-1 focus:ring-yellow-300"
+                            title={`Undo remove ${header}`}
+                          >
+                            Undo
+                          </button>
+                        )}
+                      </div>
+                    );
+                  } else if (typeof cellValue === 'boolean') {
+                    displayValue = String(cellValue);
+                    content = (
                       <div className={inputContainerClasses.join(" ")}>
                         <input 
                           type="text"
@@ -163,16 +247,83 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
                           readOnly={isReadOnly}
                           title={inputTitle}
                         />
-                        {!isReadOnly && onAutoGenerateCell && (
-                          <button
-                            onClick={() => onAutoGenerateCell(rowIndex, header)}
-                            className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
-                            title={`Auto-generate for this cell`}
-                          >
-                            🪄
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleConfigureRules(header, rowIndex)}
+                          className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          title={`Configure rules for ${header}`}
+                        >
+                          Rules
+                        </button>
                       </div>
+                    );
+                  } else if (cellValue === null) {
+                    displayValue = 'null';
+                     content = (
+                      <div className={inputContainerClasses.join(" ")}>
+                        <input 
+                          type="text"
+                          value={displayValue}
+                          onChange={(e) => handleInputChange(rowIndex, header, e)}
+                          className={inputClasses.filter(Boolean).join(" ")}
+                          readOnly={isReadOnly}
+                          title={inputTitle}
+                        />
+                        <button
+                          onClick={() => handleConfigureRules(header, rowIndex)}
+                          className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          title={`Configure rules for ${header}`}
+                        >
+                          Rules
+                        </button>
+                      </div>
+                    );
+                  } else if (typeof cellValue === 'object') {
+                    displayValue = JSON.stringify(cellValue);
+                     content = (
+                      <div className={inputContainerClasses.join(" ")}>
+                        <input 
+                          type="text"
+                          value={displayValue}
+                          onChange={(e) => handleInputChange(rowIndex, header, e)}
+                          className={inputClasses.filter(Boolean).join(" ")}
+                          readOnly={isReadOnly}
+                          title={inputTitle}
+                        />
+                        <button
+                          onClick={() => handleConfigureRules(header, rowIndex)}
+                          className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          title={`Configure rules for ${header}`}
+                        >
+                          Rules
+                        </button>
+                      </div>
+                    );
+                  } else {
+                    displayValue = String(cellValue);
+                     content = (
+                      <div className={inputContainerClasses.join(" ")}>
+                        <input 
+                          type="text"
+                          value={displayValue}
+                          onChange={(e) => handleInputChange(rowIndex, header, e)}
+                          className={inputClasses.filter(Boolean).join(" ")}
+                          readOnly={isReadOnly}
+                          title={inputTitle}
+                        />
+                        <button
+                          onClick={() => handleConfigureRules(header, rowIndex)}
+                          className="absolute right-0.5 top-1/2 transform -translate-y-1/2 px-1 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded focus:outline-none focus:ring-1 focus:ring-blue-300"
+                          title={`Configure rules for ${header}`}
+                        >
+                          Rules
+                        </button>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <td key={`${rowIndex}-${header}`} className={cellClasses}>
+                      {content}
                     </td>
                   );
                 })}
@@ -187,6 +338,13 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
           )}
         </tbody>
       </table>
+
+      <FieldRuleConfig
+        isOpen={isRuleConfigOpen}
+        onClose={() => setIsRuleConfigOpen(false)}
+        fieldName={selectedField.header}
+        onSaveRules={handleSaveRules}
+      />
     </div>
   );
 };

@@ -2,40 +2,23 @@ import React, { useState, useEffect } from 'react';
 import HomePage from './components/HomePage';
 import JsonTable from './components/JsonTable';
 import { parseJsonData } from './parserModule';
-import { faker } from '@faker-js/faker'; // Import faker
 import Papa from 'papaparse'; // Import papaparse
 import { unflatten } from 'flat'; // Removed flatten as it's unused here
 import './index.css'; // Assuming Tailwind CSS is set up here
+import { downloadFile, safeStringify } from './utils'; // Import from utils.js
+import { useLocalStorageState } from './hooks/useLocalStorageState'; // Import custom hook
+import { generateDataForColumn } from './dataGenerator'; // Import the new data generator function
 
 const DRAFT_STORAGE_KEY = 'smartcaselab_draft_v1';
 const REQUIRED_FIELDS_STORAGE_KEY = 'smartcaselab_requiredFields_v1';
 const MANUAL_HEADERS_STORAGE_KEY = 'smartcaselab_manualHeaders_v1'; // Key for manual headers
+const REMOVED_FIELDS_STORAGE_KEY = 'smartcaselab_removedFields_v1'; // Key for removed fields state
 
 // Helper function to trigger file download
-const downloadFile = (filename, content, mimeType) => {
-  const blob = new Blob([content], { type: mimeType });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(link.href);
-};
+// const downloadFile = (filename, content, mimeType) => { ... }; // REMOVE THIS
 
 // Helper function to safely stringify values for CSV
-const safeStringify = (value) => {
-  if (value === null || value === undefined) {
-    return 'null'; // Represent null/undefined as the string "null"
-  }
-  if (typeof value === 'object') {
-    // For arrays and objects, return their JSON string representation
-    return JSON.stringify(value);
-  }
-  // For primitives (string, number, boolean), return as is.
-  // PapaParse will handle quoting for strings if they contain delimiters/newlines.
-  return value;
-};
+// const safeStringify = (value) => { ... }; // REMOVE THIS
 
 function App() {
   const [tableData, setTableData] = useState({ headers: [], rows: [] });
@@ -44,31 +27,15 @@ function App() {
   const [draftMessage, setDraftMessage] = useState('');
   const [newManualColumnName, setNewManualColumnName] = useState(''); // State for the new column name input
 
-  // State for required fields
-  const [requiredFields, setRequiredFields] = useState(() => {
-    const savedRequiredFields = localStorage.getItem(REQUIRED_FIELDS_STORAGE_KEY);
-    return savedRequiredFields ? JSON.parse(savedRequiredFields) : {};
-  });
-
-  const [manualHeaders, setManualHeaders] = useState(() => {
-    const savedManualHeaders = localStorage.getItem(MANUAL_HEADERS_STORAGE_KEY);
-    return savedManualHeaders ? JSON.parse(savedManualHeaders) : [];
-  });
+  const [requiredFields, setRequiredFields] = useLocalStorageState(REQUIRED_FIELDS_STORAGE_KEY, {});
+  const [manualHeaders, setManualHeaders] = useLocalStorageState(MANUAL_HEADERS_STORAGE_KEY, []);
+  const [removedFieldsState, setRemovedFieldsState] = useLocalStorageState(REMOVED_FIELDS_STORAGE_KEY, {});
 
   // Auto-load draft on initial mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     handleLoadDraft(true);
   }, []);
-
-  // Effect to save requiredFields to localStorage
-  useEffect(() => {
-    localStorage.setItem(REQUIRED_FIELDS_STORAGE_KEY, JSON.stringify(requiredFields));
-  }, [requiredFields]);
-
-  // Effect to save manualHeaders to localStorage
-  useEffect(() => {
-    localStorage.setItem(MANUAL_HEADERS_STORAGE_KEY, JSON.stringify(manualHeaders));
-  }, [manualHeaders]);
 
   const handleJsonSuccessfullyParsed = (jsonData) => {
     try {
@@ -154,47 +121,26 @@ function App() {
       const newRows = prevData.rows.map((row, rIndex) => {
         if (rIndex === rowIndex) {
           const newRow = { ...row };
-          let generatedValue;
-          const lowerColumnId = columnId.toLowerCase();
-
-          if (lowerColumnId.includes('email')) {
-            generatedValue = faker.internet.email();
-          } else if (lowerColumnId.includes('name')) {
-            generatedValue = faker.person.fullName();
-          } else if (lowerColumnId.includes('id') && !lowerColumnId.includes('uuid')) {
-            generatedValue = faker.string.alphanumeric({ length: 8, casing: 'upper' });
-          } else if (lowerColumnId.includes('uuid') || lowerColumnId.includes('guid')) {
-            generatedValue = faker.string.uuid();
-          } else if (lowerColumnId.includes('phone') || lowerColumnId.includes('number')) {
-            generatedValue = faker.phone.number();
-          } else if (lowerColumnId.includes('address')) {
-            generatedValue = faker.location.streetAddress();
-          } else if (lowerColumnId.includes('city')) {
-            generatedValue = faker.location.city();
-          } else if (lowerColumnId.includes('zip') || lowerColumnId.includes('postal')) {
-            generatedValue = faker.location.zipCode();
-          } else if (lowerColumnId.includes('country')) {
-            generatedValue = faker.location.country();
-          } else if (lowerColumnId.includes('date')) {
-            generatedValue = faker.date.past().toLocaleDateString();
-          } else if (lowerColumnId.includes('url') || lowerColumnId.includes('website')) {
-            generatedValue = faker.internet.url();
-          } else if (lowerColumnId.includes('price') || lowerColumnId.includes('amount')) {
-            generatedValue = faker.commerce.price();
-          } else if (lowerColumnId.includes('description') || lowerColumnId.includes('comment') || lowerColumnId.includes('text')) {
-            generatedValue = faker.lorem.sentence();
-          } else if (columnId === 'Test Case Name') {
-            generatedValue = newRow[columnId]; // Keep existing
-          } else {
-            generatedValue = faker.lorem.words(3);
-          }
-
-          // Don't overwrite if the column is Test Case Name or if original was an object/array (read-only)
           const originalValue = row[columnId];
-          if (columnId !== 'Test Case Name' && (typeof originalValue !== 'object' || originalValue === null)) {
-            newRow[columnId] = generatedValue;
-          } else if (columnId !== 'Test Case Name' && originalValue === null) { 
-            newRow[columnId] = generatedValue;
+
+          // Don't overwrite if the column is Test Case Name 
+          // or if original was an object/array (read-only in cell)
+          // or if it's a field that has been marked as removed for this row
+          const isRemoved = removedFieldsState[`${rowIndex}-${columnId}`] === 'field';
+
+          if (columnId !== 'Test Case Name' && 
+              (typeof originalValue !== 'object' || originalValue === null) &&
+              !isRemoved) {
+            const generatedValue = generateDataForColumn(columnId);
+            if (generatedValue !== null) { // generateDataForColumn returns null for 'Test Case Name'
+              newRow[columnId] = generatedValue;
+            }
+          } else if (columnId !== 'Test Case Name' && originalValue === null && !isRemoved) {
+            // This condition handles explicitly null original values if not an object and not removed
+            const generatedValue = generateDataForColumn(columnId);
+            if (generatedValue !== null) {
+              newRow[columnId] = generatedValue;
+            }
           }
           return newRow;
         }
@@ -216,6 +162,7 @@ function App() {
         currentJson,
         manualHeaders, // Save manualHeaders
         requiredFields, // Also save requiredFields with the draft for consistency
+        removedFieldsState, // Save removedFieldsState
         timestamp: new Date().toISOString(),
       };
       localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draftData));
@@ -238,6 +185,7 @@ function App() {
           setCurrentJson(draftData.currentJson || null);
           setManualHeaders(draftData.manualHeaders || []); // Load manualHeaders
           setRequiredFields(draftData.requiredFields || {}); // Load requiredFields
+          setRemovedFieldsState(draftData.removedFieldsState || {}); // Load removedFieldsState
           setError(''); // Clear any previous errors
           if (!isAutoLoad) {
             setDraftMessage(`Draft from ${new Date(draftData.timestamp).toLocaleString()} loaded.`);
@@ -271,11 +219,15 @@ function App() {
       const rowsToExport = tableData.rows.map(row => {
         // eslint-disable-next-line no-useless-computed-key
         const { ['Test Case Name']: _, ...restOfRow } = row; // Exclude 'Test Case Name'
-        return unflatten(restOfRow);
+        // Remove any undefined values (removed fields)
+        const cleanedRow = Object.fromEntries(
+          Object.entries(restOfRow).filter(([_, value]) => value !== undefined)
+        );
+        return unflatten(cleanedRow);
       });
       
       // If original input was a single object and we only have one row, export a single object.
-      // Otherwise, export an array of objects. This handles most use cases.
+      // Otherwise, export an array of objects.
       const jsonDataToExport = (currentJson && !Array.isArray(currentJson) && rowsToExport.length === 1)
         ? rowsToExport[0]
         : rowsToExport;
@@ -319,22 +271,30 @@ function App() {
           if (Object.prototype.hasOwnProperty.call(schemaReferenceObject, topLevelKey)) {
             const originalValue = schemaReferenceObject[topLevelKey];
             
+            // Skip if the field was removed (undefined)
+            if (flatRowData[topLevelKey] === undefined) {
+              continue;
+            }
+            
             if (typeof originalValue === 'object' && originalValue !== null) {
               // Reconstruct the complex object/array for this topLevelKey from the flatRowData
               let relevantFlatData = {};
               for (const flatKey in flatRowData) {
                 if (flatKey === topLevelKey || flatKey.startsWith(topLevelKey + '.')) {
+                  // Skip if the field was removed (undefined)
+                  if (flatRowData[flatKey] === undefined) {
+                    continue;
+                  }
                   relevantFlatData[flatKey] = flatRowData[flatKey];
                 }
               }
-              // Unflatten only the portion relevant to this topLevelKey
-              // The result of unflatten might be { topLevelKey: { ... actual data ...} }
-              // or if topLevelKey itself was a root of a simple value in flatRowData (unlikely for complex)
-              // we need to ensure we extract the correct structure that unflatten returns.
-              const unflattenedPortion = unflatten(relevantFlatData);
-              newCsvRow[topLevelKey] = safeStringify(unflattenedPortion[topLevelKey]);
+              // Only add the field if there's data to add
+              if (Object.keys(relevantFlatData).length > 0) {
+                const unflattenedPortion = unflatten(relevantFlatData);
+                newCsvRow[topLevelKey] = safeStringify(unflattenedPortion[topLevelKey]);
+              }
             } else {
-              // For primitives, directly get from flatRowData (which should have this topLevelKey)
+              // For primitives, directly get from flatRowData
               newCsvRow[topLevelKey] = safeStringify(flatRowData[topLevelKey]);
             }
           }
@@ -349,8 +309,8 @@ function App() {
       downloadFile('test_cases_structured.csv', csvString, 'text/csv;charset=utf-8;');
       setDraftMessage('Structured CSV exported successfully!');
     } catch (e) {
-      console.error('Failed to export structured CSV:', e);
-      setDraftMessage('Error exporting structured CSV. See console.');
+      console.error('Failed to export CSV:', e);
+      setDraftMessage('Error exporting CSV. See console.');
     }
     setTimeout(() => setDraftMessage(''), 3000);
   };
@@ -508,6 +468,145 @@ function App() {
     setTimeout(() => setDraftMessage(''), 3000);
   };
 
+  const handleRemoveFieldFromRow = (rowIndex, fieldName) => {
+    // 1. Capture the original value from the current tableData state
+    let valueToStore = undefined;
+    if (tableData.rows[rowIndex]) {
+      valueToStore = tableData.rows[rowIndex][fieldName];
+    }
+
+    // 2. Update removedFieldsState with the captured original value
+    if (valueToStore !== undefined) {
+      setRemovedFieldsState(prevRemoved => ({
+        ...prevRemoved,
+        [rowIndex]: { ...prevRemoved[rowIndex], [fieldName]: valueToStore }
+      }));
+    }
+
+    // 3. Update tableData to mark the field as removed
+    setTableData(prevData => {
+      const newRows = prevData.rows.map((row, rIndex) => {
+        if (rIndex === rowIndex) {
+          const updatedRow = { ...row };
+          delete updatedRow[fieldName]; // Mark as removed for UI and export
+          return updatedRow;
+        }
+        return row;
+      });
+
+      // Handle manual headers based on the newRows
+      let newManualHeaders = Array.isArray(prevData.manualHeaders) ? [...prevData.manualHeaders] : [];
+      if (Array.isArray(prevData.manualHeaders) && prevData.manualHeaders.includes(fieldName)) { // Check against prevData.manualHeaders
+         const isHeaderStillNeeded = newRows.some(row => row.hasOwnProperty(fieldName) && row[fieldName] !== undefined);
+         if (!isHeaderStillNeeded) {
+            newManualHeaders = newManualHeaders.filter(header => header !== fieldName);
+         }
+      }
+
+      return {
+        ...prevData,
+        rows: newRows,
+        manualHeaders: newManualHeaders,
+      };
+    });
+  };
+
+  const handleUndoRemoveField = (rowIndex, fieldName) => {
+    console.log(`Attempting undo for row ${rowIndex}, field: ${fieldName}`);
+    setRemovedFieldsState(prevRemoved => {
+      console.log('Previous removedFieldsState:', prevRemoved);
+      const rowRemovedState = prevRemoved[rowIndex];
+      const originalValue = rowRemovedState ? rowRemovedState[fieldName] : undefined;
+      console.log(`Original value found for ${fieldName} in row ${rowIndex}:`, originalValue);
+
+      if (originalValue !== undefined) {
+        console.log('Original value is defined, proceeding with undo...');
+        
+        // We will always attempt to setTableData if originalValue was found
+        setTableData(prevData => {
+          console.log('Previous tableData in undo:', prevData);
+          const newRows = prevData.rows.map((row, rIdx) => {
+            if (rIdx === rowIndex) {
+              return { ...row, [fieldName]: originalValue };
+            }
+            return { ...row }; // Ensure all rows are new objects
+          });
+          
+           let newManualHeaders = Array.isArray(prevData.manualHeaders) ? [...prevData.manualHeaders] : [];
+           const isOriginalHeader = prevData.headers.includes(fieldName);
+           const isHeaderPresentInAnyRowAfterUndo = newRows.some(row => row.hasOwnProperty(fieldName) && row[fieldName] !== undefined);
+           console.log(`Is original header: ${isOriginalHeader}, Present after undo: ${isHeaderPresentInAnyRowAfterUndo}, Current manual headers:`, newManualHeaders);
+
+           if (isHeaderPresentInAnyRowAfterUndo && !isOriginalHeader && !newManualHeaders.includes(fieldName)) {
+               newManualHeaders.push(fieldName);
+               console.log('Adding field to manualHeaders:', fieldName);
+           }
+
+          console.log('New manual headers after undo logic:', newManualHeaders);
+          console.log('New rows after undo:', newRows);
+          return { headers: [...prevData.headers], rows: newRows, manualHeaders: newManualHeaders };
+        });
+
+        // Idempotent cleanup of removedFieldsState:
+        // Only create newRemoved if the field actually exists in prevRemoved
+        if (prevRemoved[rowIndex] && prevRemoved[rowIndex].hasOwnProperty(fieldName)) {
+            const newRemoved = { ...prevRemoved };
+            // Deep clone the row entry to modify it
+            newRemoved[rowIndex] = { ...newRemoved[rowIndex] }; 
+            delete newRemoved[rowIndex][fieldName];
+            if (Object.keys(newRemoved[rowIndex]).length === 0) {
+              delete newRemoved[rowIndex];
+            }
+            setDraftMessage(`Undo successful for ${fieldName} in row ${rowIndex + 1}.`);
+            setTimeout(() => setDraftMessage(''), 3000);
+            console.log('Cleaned up removedFieldsState.', newRemoved);
+            return newRemoved;
+        }
+        // If the field wasn't in prevRemoved (e.g., second StrictMode call), don't change prevRemoved
+        console.log('Field was not in removedFieldsState (likely already processed), no change to removedFieldsState.');
+        return prevRemoved; 
+
+      }
+      console.log('Original value is undefined in removedFieldsState, undo aborted.');
+      return prevRemoved;
+    });
+  };
+
+  const handleAddRows = (newRows) => {
+    setTableData(prevData => {
+      // Ensure each new row has all required fields
+      const completeNewRows = newRows.map(row => {
+        const completeRow = { ...row };
+        // Add any missing headers with empty values, but exclude fields marked for removal
+        [...prevData.headers, ...manualHeaders].forEach(header => {
+          if (!(header in completeRow)) {
+            if (header === 'Test Case Name') {
+              // Generate a new TC number for the Test Case Name
+              let maxTcNum = 0;
+              prevData.rows.forEach(r => {
+                if (r['Test Case Name'] && r['Test Case Name'].startsWith('TC_')) {
+                  const num = parseInt(r['Test Case Name'].substring(3), 10);
+                  if (!isNaN(num) && num > maxTcNum) {
+                    maxTcNum = num;
+                  }
+                }
+              });
+              completeRow[header] = `TC_${String(maxTcNum + 1).padStart(2, '0')}`;
+            } else {
+              completeRow[header] = '';
+            }
+          }
+        });
+        return completeRow;
+      });
+
+      return {
+        ...prevData,
+        rows: [...prevData.rows, ...completeNewRows]
+      };
+    });
+  };
+
   return (
     <div className="App">
       <HomePage onJsonParsed={handleJsonSuccessfullyParsed} />
@@ -602,6 +701,10 @@ function App() {
             requiredFields={requiredFields}
             onToggleRequiredField={handleToggleRequiredField}
             onCopyFromPreviousRow={handleCopyFromPreviousRow}
+            onAddRows={handleAddRows}
+            onRemoveFieldFromRow={handleRemoveFieldFromRow}
+            onUndoRemoveField={handleUndoRemoveField}
+            removedFieldsState={removedFieldsState}
           />
         </div>
       )}
