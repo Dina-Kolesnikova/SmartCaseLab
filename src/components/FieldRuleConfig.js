@@ -21,16 +21,26 @@ const FieldRuleConfig = ({ isOpen, onClose, fieldName, onSaveRules }) => {
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setRules(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
+    if (name.includes('.')) {
+      const [parent, child] = name.split('.');
+      setRules(prev => ({
+        ...prev,
+        [parent]: {
+          ...prev[parent],
+          [child]: type === 'checkbox' ? checked : (type === 'number' ? parseInt(value, 10) || 0 : value)
+        }
+      }));
+    } else {
+      setRules(prev => ({
+        ...prev,
+        [name]: type === 'checkbox' ? checked : (type === 'number' && name !== 'enumValues' && name !== 'objectKeys' ? parseInt(value, 10) || 0 : value)
+      }));
+    }
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    console.log(onSaveRules)
-    onSaveRules(fieldName, rules);
+    onSaveRules(rules);
     onClose();
   };
 

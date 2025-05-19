@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import HomePage from './components/HomePage';
 import JsonTable from './components/JsonTable';
 import { parseJsonData } from './parserModule';
@@ -31,11 +31,42 @@ function App() {
   const [manualHeaders, setManualHeaders] = useLocalStorageState(MANUAL_HEADERS_STORAGE_KEY, []);
   const [removedFieldsState, setRemovedFieldsState] = useLocalStorageState(REMOVED_FIELDS_STORAGE_KEY, {});
 
+  const handleLoadDraft = useCallback((isAutoLoad = false) => {
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (savedDraft) {
+        const draftData = JSON.parse(savedDraft);
+        if (draftData && draftData.tableData) {
+          setTableData(draftData.tableData);
+          setCurrentJson(draftData.currentJson || null);
+          setManualHeaders(draftData.manualHeaders || []);
+          setRequiredFields(draftData.requiredFields || {});
+          setRemovedFieldsState(draftData.removedFieldsState || {});
+          setError('');
+          if (!isAutoLoad) {
+            setDraftMessage(`Draft from ${new Date(draftData.timestamp).toLocaleString()} loaded.`);
+          }
+          console.log('Draft loaded:', draftData);
+        } else {
+          if (!isAutoLoad) setDraftMessage('Invalid draft data found.');
+          console.warn('Invalid draft data structure:', draftData);
+        }
+      } else {
+        if (!isAutoLoad) setDraftMessage('No draft found.');
+      }
+    } catch (e) {
+      console.error('Failed to load draft:', e);
+      if (!isAutoLoad) setDraftMessage('Error loading draft. See console for details.');
+    }
+    if (!isAutoLoad) {
+        setTimeout(() => setDraftMessage(''), 3000);
+    }
+  }, [setTableData, setCurrentJson, setManualHeaders, setRequiredFields, setRemovedFieldsState, setError, setDraftMessage]);
+
   // Auto-load draft on initial mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     handleLoadDraft(true);
-  }, []);
+  }, [handleLoadDraft]);
 
   const handleJsonSuccessfullyParsed = (jsonData) => {
     try {
@@ -173,40 +204,6 @@ function App() {
       setDraftMessage('Error saving draft. See console for details.');
     }
     setTimeout(() => setDraftMessage(''), 3000); // Clear message after 3 seconds
-  };
-
-  const handleLoadDraft = (isAutoLoad = false) => {
-    try {
-      const savedDraft = localStorage.getItem(DRAFT_STORAGE_KEY);
-      if (savedDraft) {
-        const draftData = JSON.parse(savedDraft);
-        if (draftData && draftData.tableData) { // currentJson can be null if only manual cols exist
-          setTableData(draftData.tableData);
-          setCurrentJson(draftData.currentJson || null);
-          setManualHeaders(draftData.manualHeaders || []); // Load manualHeaders
-          setRequiredFields(draftData.requiredFields || {}); // Load requiredFields
-          setRemovedFieldsState(draftData.removedFieldsState || {}); // Load removedFieldsState
-          setError(''); // Clear any previous errors
-          if (!isAutoLoad) {
-            setDraftMessage(`Draft from ${new Date(draftData.timestamp).toLocaleString()} loaded.`);
-          }
-          console.log('Draft loaded:', draftData);
-        } else {
-          if (!isAutoLoad) setDraftMessage('Invalid draft data found.');
-          console.warn('Invalid draft data structure:', draftData);
-        }
-      } else {
-        if (!isAutoLoad) setDraftMessage('No draft found.');
-      }
-    } catch (e) {
-      console.error('Failed to load draft:', e);
-      if (!isAutoLoad) setDraftMessage('Error loading draft. See console for details.');
-      // Optionally clear potentially corrupted draft
-      // localStorage.removeItem(DRAFT_STORAGE_KEY);
-    }
-    if (!isAutoLoad) {
-        setTimeout(() => setDraftMessage(''), 3000);
-    }
   };
 
   const handleExportJson = () => {

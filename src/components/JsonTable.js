@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import FieldRuleConfig from './FieldRuleConfig';
-import { generateTestData, detectFieldType } from '../utils/dataGenerator';
+import { generateTestData } from '../utils/dataGenerator';
 
 const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRow, onAutoGenerateCell, requiredFields, onToggleRequiredField, onCopyFromPreviousRow, onAddRows, onRemoveFieldFromRow, onUndoRemoveField }) => {
   const [selectedField, setSelectedField] = useState({ header: null, rowIndex: null });
@@ -54,70 +54,85 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
     setIsRuleConfigOpen(true);
   };
 
-  const handleSaveRules = (fieldName, rules) => {
+  const handleSaveRules = (rules) => {
     const generatedValues = generateTestData(rules);
-    const { header, rowIndex } = selectedField; // Get the selected row index
+    const { header: fieldToConfigure, rowIndex } = selectedField;
+
+    if (!fieldToConfigure) {
+      console.error("No field selected to configure rules for.");
+      return;
+    }
     
     // Handle field removal first
     if (rules.removeField || rules.removeObject) {
       if (rowIndex !== null && onRemoveFieldFromRow) {
-        // Call parent to remove the field from the specific row
-        onRemoveFieldFromRow(rowIndex, fieldName);
+        onRemoveFieldFromRow(rowIndex, fieldToConfigure);
       }
       
-      // If generating new rows after removal, create them without the field
       if (rules.numberOfCases > 0) {
-        // Create new rows based on the row AFTER removal
-        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : { ...rows[0] }; // Use the modified row if available, otherwise first row
-        delete baseRow[fieldName]; // Ensure the base row for new cases doesn't have the field
+        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : (rows.length > 0 ? { ...rows[0] } : {});
+        delete baseRow[fieldToConfigure];
         
-        const newRows = Array(rules.numberOfCases).fill().map(() => ({ ...baseRow }));
+        const newRowsToAdd = Array(rules.numberOfCases).fill().map(() => ({ ...baseRow }));
 
         if (onAddRows) {
-          onAddRows(newRows);
+          onAddRows(newRowsToAdd);
         }
       }
 
     } else { // Handle data generation rules
       if (rules.applyToExisting) {
-        // Apply rules to all existing rows (excluding the one being configured if it was specified)
-        const updatedRows = rows.map((row, index) => {
-          // Only apply to existing rows, skip if configuring a specific row and applyToExisting is false
-           if (rowIndex !== null && index !== rowIndex && !rules.applyToExisting) return row;
+        const updatedRowsData = rows.map((row, index) => {
+           if (rowIndex !== null && index === rowIndex && !rules.applyToExisting) return row; // if configuring specific row, don't apply to itself unless applyToExisting is true
+           if (rowIndex !== null && index !== rowIndex && !rules.applyToExisting && selectedField.rowIndex === index ) return row; // Skip the currently configured row if not applying to all
 
           const newRow = { ...row };
-          newRow[fieldName] = generatedValues[index % generatedValues.length];
+          newRow[fieldToConfigure] = generatedValues[index % generatedValues.length]; // Use generatedValues from selected rules
           return newRow;
         });
         
-        // Update all applicable rows
         if (onCellChange) {
-          updatedRows.forEach((row, rIndex) => {
-             // Only call onCellChange if the value actually changed or it's the row being configured
-             if (rIndex === rowIndex || rows[rIndex][fieldName] !== row[fieldName]){
-                onCellChange(rIndex, fieldName, row[fieldName]);
+          updatedRowsData.forEach((row, rIndex) => {
+             if (rIndex === rowIndex || rows[rIndex][fieldToConfigure] !== row[fieldToConfigure]){
+                onCellChange(rIndex, fieldToConfigure, row[fieldToConfigure]);
              }
           });
         }
       }
       
-      // Generate additional new rows based on the rule
       if (rules.numberOfCases > 0) {
-         // If a specific row was configured, base new rows on that row's current state
-        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : { ...rows[0] }; // Use the selected row state or the first row
+        const baseRow = rowIndex !== null ? { ...rows[rowIndex] } : (rows.length > 0 ? { ...rows[0] } : {});
+        // Apply the rule to the base row before generating new ones, if it's the configured row and not applying to existing only
+        if (rowIndex !== null && !rules.applyToExisting) { 
+            baseRow[fieldToConfigure] = generateTestData(rules)[0]; // Assuming generateTestData returns an array
+        } else if (rowIndex === null && !rules.applyToExisting && rows.length > 0) {
+             // if no specific row, but generating for a column (e.g. header button in future)
+             // and applyToExisting is false, we'd still want the new rows to have the generated value
+            baseRow[fieldToConfigure] = generateTestData(rules)[0];
+        } else if (rules.applyToExisting && rowIndex !== null) {
+            // If applyToExisting is true, the baseRow should already have the updated value from above loop
+            // No specific action needed here for baseRow[fieldToConfigure] as it's covered if rowIndex is part of rows updated
+        }
 
-        const newRows = generatedValues.map(value => {
+
+        const newRowsToAdd = Array(rules.numberOfCases).fill(null).map((_, i) => {
           const rowToPopulate = { ...baseRow }; 
-          rowToPopulate[fieldName] = value;
+          // Use values from the generated set, cycling through them
+          rowToPopulate[fieldToConfigure] = generatedValues[i % generatedValues.length];
           return rowToPopulate;
         });
 
-        // Call the parent component's onAddRows function to add the new rows
         if (onAddRows) {
-          onAddRows(newRows);
+          onAddRows(newRowsToAdd);
+        }
+      } else if (rowIndex !== null && !rules.applyToExisting) {
+        // Single application to the current cell if not generating multiple cases and not applying to all existing
+        if (onCellChange) {
+          onCellChange(rowIndex, fieldToConfigure, generateTestData(rules)[0]);
         }
       }
     }
+    setIsRuleConfigOpen(false); // Close modal after saving
   };
 
     
@@ -339,12 +354,17 @@ const JsonTable = ({ headers, manualHeaders = [], rows, onCellChange, onDeleteRo
         </tbody>
       </table>
 
-      <FieldRuleConfig
-        isOpen={isRuleConfigOpen}
-        onClose={() => setIsRuleConfigOpen(false)}
-        fieldName={selectedField.header}
-        onSaveRules={handleSaveRules}
-      />
+      {isRuleConfigOpen && selectedField.header && (
+        <FieldRuleConfig 
+          field={selectedField.header} 
+          // rules={{}} /* Consider passing existing rules for editing in the future */ 
+          onSaveRules={handleSaveRules}
+          onClose={() => setIsRuleConfigOpen(false)} 
+          // fieldType prop removed here
+          isObjectContext={typeof (rows.length > 0 && rows[selectedField.rowIndex] ? rows[selectedField.rowIndex][selectedField.header] : undefined) === 'object'}
+          initialRowIndex={selectedField.rowIndex}
+        />
+      )}
     </div>
   );
 };

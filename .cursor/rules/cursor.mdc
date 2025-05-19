@@ -1,5 +1,8 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
+# Testing
+- Once you are done making changes to the codebase, run all the tests and ensure they pass
+- Once you are done making changes, proactively ask the user if you should also writ lew tests to cover a new functionality.
